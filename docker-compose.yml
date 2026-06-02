@@ -1,0 +1,27 @@
+services:
+  bridge-orders:
+    build: .
+    image: pg-notify-bridge:latest
+    restart: unless-stopped
+    env_file:
+      - .env.orders
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  bridge-inventory:
+    build: .
+    image: pg-notify-bridge:latest
+    restart: unless-stopped
+    env_file:
+      - .env.inventory
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Example: run one instance per business domain.
+# Copy .env.example to .env.orders / .env.inventory and adjust channels/webhooks.

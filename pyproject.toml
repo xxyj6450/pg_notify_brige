@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pg-notify-bridge"
+version = "1.0.0"
+description = "Listen to PostgreSQL NOTIFY channels and forward messages to webhooks"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pgnotify>=0.1",
+    "psycopg2-binary>=2.9",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+pg-notify-bridge = "pg_notify_bridge.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
