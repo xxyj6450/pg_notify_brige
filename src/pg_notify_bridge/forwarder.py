@@ -1,4 +1,8 @@
-"""Asynchronous webhook forwarding with retries."""
+"""Webhook 异步转发与重试逻辑。
+
+监听循环在收到 NOTIFY 后立即 submit 任务到线程池，
+由 worker 负责 HTTP POST，避免阻塞 PostgreSQL 长连接监听。
+"""
 
 from __future__ import annotations
 
@@ -19,6 +23,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class NotificationPayload:
+    """转发到 Webhook 的 JSON 消息体结构。
+
+    Attributes:
+        channel: NOTIFY 频道名。
+        payload: NOTIFY 携带的字符串载荷，可能为 None。
+        pid: 发送 NOTIFY 的 PostgreSQL 后端进程 ID。
+        received_at: 本服务收到通知的 UTC 时间（ISO 8601）。
+    """
+
     channel: str
     payload: str | None
     pid: int
@@ -26,6 +39,14 @@ class NotificationPayload:
 
     @classmethod
     def from_notify(cls, notify: Any) -> NotificationPayload:
+        """从 pgnotify 返回的通知对象构造载荷。
+
+        Args:
+            notify: 具有 channel、payload、pid 属性的 NOTIFY 对象。
+
+        Returns:
+            用于序列化并 POST 的不可变载荷。
+        """
         return cls(
             channel=notify.channel,
             payload=notify.payload,
@@ -34,13 +55,23 @@ class NotificationPayload:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """转换为可 JSON 序列化的字典。"""
         return asdict(self)
 
 
 class WebhookForwarder:
-    """Submit webhook deliveries to a background thread pool."""
+    """将 NOTIFY 消息异步投递到 Webhook 的后台转发器。
+
+    使用 ThreadPoolExecutor 在独立线程中执行 HTTP 请求，
+    主监听线程只需调用 submit()，不会被网络 I/O 阻塞。
+    """
 
     def __init__(self, settings: Settings) -> None:
+        """初始化线程池与 HTTP 客户端。
+
+        Args:
+            settings: 包含 webhook_url、超时、重试等参数的配置。
+        """
         self._settings = settings
         self._executor = ThreadPoolExecutor(
             max_workers=settings.worker_threads,
@@ -50,15 +81,26 @@ class WebhookForwarder:
             timeout=settings.webhook_timeout,
             follow_redirects=True,
         )
+        # 跟踪尚未完成的投递任务，便于优雅关闭时等待
         self._pending: set[Future[None]] = set()
 
     def submit(self, notify: Any) -> None:
+        """提交一条 NOTIFY 到后台线程异步投递。
+
+        Args:
+            notify: pgnotify yield 的原始通知对象。
+        """
         message = NotificationPayload.from_notify(notify)
         future = self._executor.submit(self._deliver, message)
         self._pending.add(future)
         future.add_done_callback(self._on_done)
 
     def wait_for_pending(self, timeout: float | None = None) -> None:
+        """阻塞等待所有在途 Webhook 任务完成（或超时）。
+
+        Args:
+            timeout: 每个 future 的最大等待秒数；None 表示一直等待。
+        """
         pending = list(self._pending)
         for future in pending:
             try:
@@ -67,11 +109,14 @@ class WebhookForwarder:
                 logger.exception("Unexpected error while waiting for webhook delivery")
 
     def close(self) -> None:
+        """关闭转发器：等待在途任务、停止线程池、释放 HTTP 连接。"""
+        # 给予足够时间让最后一次重试完成
         self.wait_for_pending(timeout=self._settings.webhook_timeout * 2)
         self._executor.shutdown(wait=True, cancel_futures=False)
         self._client.close()
 
     def _on_done(self, future: Future[None]) -> None:
+        """Future 完成回调：从 pending 集合移除并记录未捕获异常。"""
         self._pending.discard(future)
         try:
             future.result()
@@ -79,11 +124,20 @@ class WebhookForwarder:
             logger.exception("Webhook delivery task failed unexpectedly")
 
     def _deliver(self, message: NotificationPayload) -> None:
+        """在 worker 线程中执行 HTTP POST，失败时按配置重试。
+
+        重试策略：最多 webhook_max_retries 次额外尝试，
+        第 n 次重试前等待 n × webhook_retry_backoff 秒。
+
+        Args:
+            message: 已封装好的 Webhook JSON 载荷。
+        """
         body = json.dumps(message.to_dict(), ensure_ascii=False)
         settings = self._settings
         attempt = 0
         last_error: Exception | None = None
 
+        # 总尝试次数 = 1 次初始请求 + webhook_max_retries 次重试
         while attempt <= settings.webhook_max_retries:
             attempt += 1
             try:
@@ -111,6 +165,7 @@ class WebhookForwarder:
                     exc,
                 )
             except httpx.HTTPStatusError as exc:
+                # 4xx/5xx 响应：记录状态码与响应体摘要
                 last_error = exc
                 logger.warning(
                     "Webhook HTTP error | channel=%s | status=%s | attempt=%s/%s | body=%s",
@@ -121,6 +176,7 @@ class WebhookForwarder:
                     _truncate(exc.response.text),
                 )
             except httpx.HTTPError as exc:
+                # 连接失败、DNS 错误等网络层问题
                 last_error = exc
                 logger.warning(
                     "Webhook request failed | channel=%s | attempt=%s/%s | error=%s",
@@ -148,6 +204,15 @@ class WebhookForwarder:
 
 
 def _truncate(text: str, limit: int = 200) -> str:
+    """截断过长文本，避免错误响应体刷屏日志。
+
+    Args:
+        text: 原始字符串（如 HTTP 响应 body）。
+        limit: 最大保留字符数。
+
+    Returns:
+        去除换行并截断后的单行文本。
+    """
     text = text.replace("\n", " ").strip()
     if len(text) <= limit:
         return text
