@@ -2,3 +2,5 @@ pgnotify>=0.1
 psycopg2-binary>=2.9
 httpx>=0.27
 python-dotenv>=1.0
+logx
+six

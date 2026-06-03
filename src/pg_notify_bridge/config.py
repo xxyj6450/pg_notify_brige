@@ -32,6 +32,10 @@ class Settings:
         reconnect_delay: 数据库断连后，下次重连前的等待时间（秒）。
         log_level: 日志级别字符串，如 INFO、DEBUG。
         worker_threads: Webhook 异步投递线程池大小。
+        bot_key:默认企业微信群机器人key，当notify中没有bot_key时使用。
+        event_source: 默认事件源，如 "postgresql"、"kafka"、"rabbitmq"，当notify中没有event_source时使用。
+        project: 默认项目名，如 "orders"、"inventory"，用于写入JIRA项目任务，当notify中没有project时使用。
+        component: 默认组件名，如 "orders"、"inventory"，用于写入JIRA项目任务，当notify中没有component时使用。
     """
 
     pg_dsn: str
@@ -45,6 +49,10 @@ class Settings:
     reconnect_delay: float
     log_level: str
     worker_threads: int
+    bot_key: str
+    event_source: str
+    project: str
+    component: str
 
 
 def _require(name: str) -> str:
@@ -165,6 +173,10 @@ def load_settings() -> Settings:
         log_level=os.getenv("LOG_LEVEL", "INFO").strip() or "INFO",
         # 至少保留 1 个 worker，避免线程池配置为 0 导致无法投递
         worker_threads=max(1, _parse_int("WORKER_THREADS", 4)),
+        bot_key=os.getenv("BOT_KEY"),
+        event_source=os.getenv("EVENT_SOURCE"),
+        project=os.getenv("PROJECT"),
+        component=os.getenv("COMPONENT"),
     )
 
 
@@ -188,6 +200,10 @@ def settings_summary(settings: Settings) -> dict[str, Any]:
         "reconnect_delay": settings.reconnect_delay,
         "log_level": settings.log_level,
         "worker_threads": settings.worker_threads,
+        "bot_key": settings.bot_key,
+        "event_source": settings.event_source,
+        "project": settings.project,
+        "component": settings.component,
     }
 
 

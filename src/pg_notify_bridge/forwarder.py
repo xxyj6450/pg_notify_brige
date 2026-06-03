@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-
+from urllib.parse import quote
 from .config import Settings
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class NotificationPayload:
         """
         return cls(
             channel=notify.channel,
-            payload=notify.payload,
+            payload= json.loads(notify.payload),
             pid=notify.pid,
             received_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -122,6 +122,10 @@ class WebhookForwarder:
             future.result()
         except Exception:
             logger.exception("Webhook delivery task failed unexpectedly")
+    def _safe_quote(self, value):
+        if isinstance(value, bytes):
+            value = value.decode('utf-8')
+        return quote(str(value))  # 确保转为字符串
 
     def _deliver(self, message: NotificationPayload) -> None:
         """在 worker 线程中执行 HTTP POST，失败时按配置重试。
@@ -136,13 +140,32 @@ class WebhookForwarder:
         settings = self._settings
         attempt = 0
         last_error: Exception | None = None
-
+        # 从payload中获取event_source、bot_key、project、component、severity、event_id
+        payload = json.loads(message.payload)
+        # 优先从payload中获取，如果没有则从channel中获取，如果没有则从settings中获取
+        event_source = payload.get("event_source") or message.channel or settings.event_source or ""
+        # 优先从payload中获取，如果没有则从settings中获取   
+        bot_key = payload.get("bot_key") or settings.bot_key or ""
+        # 优先从payload中获取，如果没有则从settings中获取
+        project = payload.get("project") or settings.project or ""
+        # 优先从payload中获取，如果没有则从settings中获取
+        component = payload.get("component") or settings.component or ""
+        # 优先从payload中获取，如果没有则从settings中获取
+        severity = payload.get("severity") or "信息"
+        # 优先从payload中获取，如果没有则从settings中获取
+        event_id = payload.get("event_id") or ""
+        # 如果bot_key不为空，则redirect为1，否则为0
+        redirect= "1" if bot_key not in("",None) else "0"
         # 总尝试次数 = 1 次初始请求 + webhook_max_retries 次重试
         while attempt <= settings.webhook_max_retries:
             attempt += 1
             try:
+                url=settings.webhook_url + "?source=" + self._safe_quote(event_source) + "&botkey=" + self._safe_quote(bot_key) + "&project=" + self._safe_quote(project) + "&component=" + self._safe_quote(component) + "&severity=" + self._safe_quote(severity) + "&redirect=" + self._safe_quote(redirect) + "&event_id=" + self._safe_quote(event_id)
+                logger.info("Webhook url: %s", url)
+                logger.info("Webhook body: %s", body)
+                logger.info("Webhook headers: %s", settings.webhook_headers)
                 response = self._client.post(
-                    settings.webhook_url,
+                    url,
                     content=body,
                     headers=settings.webhook_headers,
                 )
