@@ -1,7 +1,7 @@
 # pg-notify-bridge
 
 将 PostgreSQL `NOTIFY` 消息实时转发到 HTTP Webhook 的轻量服务。基于 [pgnotify](https://github.com/djrobstep/pgnotify) 实现多频道长期监听，Webhook 投递在后台线程池中异步执行，适合 Docker 中长期运行。
-本项目由[cursor](https://www.cursor.com/)免费Auto模式一次性开发。
+本项目由[cursor](https://www.cursor.com/)免费Auto模式一次性开发完成。
 
 ## 功能
 
