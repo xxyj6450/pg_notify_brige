@@ -66,9 +66,9 @@ docker pull hesonglai/pg_notify_bridge:latest
 ### 5. 示例脚本
 maxkb的对话、工具调用监控示例
 - [maxkb/monitor_chat.sql](examples/maxkb/monitor_chat.sql)
-  - 监听 `chat` 频道，将新消息 POST 到 `https://webhook.maxkb.ai/chat`
+  - 监听 `chat` 频道
  - [monitor_tool_record.sql](examples/maxkb/monitor_tool_record.sql)
-  - 监听 `tool_record` 频道，将新记录 POST 到 `https://webhook.maxkb.ai/tool_record`
+  - 监听 `tool_record` 频道
 
 ### 6. 多实例部署
 
